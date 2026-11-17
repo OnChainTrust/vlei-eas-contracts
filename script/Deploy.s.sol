@@ -10,7 +10,8 @@ import {ISchemaRegistry} from "@eas/ISchemaRegistry.sol";
 /// Sepolia EAS: 0xC2679fBD37d54388Ce493F1DB75320D236e1815e
 /// Sepolia SchemaRegistry: 0x0a7E2Ff54e76B8E6659aedc9103FB21c038050D0
 contract DeployScript is Script {
-    string constant SCHEMA = "string lei,string legalName,string credType,string keriAid,bytes32 vleiSaid,uint64 verifiedAt";
+    string constant SCHEMA =
+        "string lei,string legalName,string credType,string keriAid,bytes32 vleiSaid,uint64 verifiedAt";
     address constant SEPOLIA_EAS = 0xC2679fBD37d54388Ce493F1DB75320D236e1815e;
     address constant SEPOLIA_SCHEMA_REGISTRY = 0x0a7E2Ff54e76B8E6659aedc9103FB21c038050D0;
     uint256 constant SEPOLIA_CHAIN_ID = 11155111;
@@ -39,10 +40,18 @@ contract DeployScript is Script {
         // Write deployment artifact
         string memory json = string.concat(
             "{\n",
-            '  "resolverAddress": "', vm.toString(address(resolver)), '",\n',
-            '  "schemaUid": "', vm.toString(schemaUid), '",\n',
-            '  "deployer": "', vm.toString(deployer), '",\n',
-            '  "deployedAt": "', vm.toString(block.timestamp), '"\n',
+            '  "resolverAddress": "',
+            vm.toString(address(resolver)),
+            '",\n',
+            '  "schemaUid": "',
+            vm.toString(schemaUid),
+            '",\n',
+            '  "deployer": "',
+            vm.toString(deployer),
+            '",\n',
+            '  "deployedAt": "',
+            vm.toString(block.timestamp),
+            '"\n',
             "}\n"
         );
         vm.writeFile("deployments/sepolia.json", json);

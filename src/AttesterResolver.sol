@@ -17,12 +17,28 @@ contract AttesterResolver is SchemaResolver {
         bridgeWallet = _bridgeWallet;
     }
 
-    function onAttest(Attestation calldata attestation, uint256 /*value*/) internal view override returns (bool) {
+    function onAttest(
+        Attestation calldata attestation,
+        uint256 /*value*/
+    )
+        internal
+        view
+        override
+        returns (bool)
+    {
         if (attestation.attester != bridgeWallet) revert UnauthorizedAttester();
         return true;
     }
 
-    function onRevoke(Attestation calldata attestation, uint256 /*value*/) internal view override returns (bool) {
+    function onRevoke(
+        Attestation calldata attestation,
+        uint256 /*value*/
+    )
+        internal
+        view
+        override
+        returns (bool)
+    {
         if (attestation.attester != bridgeWallet) revert UnauthorizedAttester();
         return true;
     }

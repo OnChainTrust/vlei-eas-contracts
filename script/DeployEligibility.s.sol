@@ -28,15 +28,27 @@ contract DeployEligibilityScript is Script {
         vm.stopBroadcast();
 
         console.log("VleiEligibility deployed:", address(slot));
-        for (uint256 i = 0; i < credTypes.length; i++) console.log("  accepts credType:", credTypes[i]);
+        for (uint256 i = 0; i < credTypes.length; i++) {
+            console.log("  accepts credType:", credTypes[i]);
+        }
 
         string memory json = string.concat(
             "{\n",
-            '  "vleiEligibility": "', vm.toString(address(slot)), '",\n',
-            '  "schemaUid": "', vm.toString(BRIDGE_SCHEMA_UID), '",\n',
-            '  "attester": "', vm.toString(BRIDGE_ATTESTER), '",\n',
-            '  "acceptedCredTypes": "', _join(credTypes), '",\n',
-            '  "deployedAt": "', vm.toString(block.timestamp), '"\n',
+            '  "vleiEligibility": "',
+            vm.toString(address(slot)),
+            '",\n',
+            '  "schemaUid": "',
+            vm.toString(BRIDGE_SCHEMA_UID),
+            '",\n',
+            '  "attester": "',
+            vm.toString(BRIDGE_ATTESTER),
+            '",\n',
+            '  "acceptedCredTypes": "',
+            _join(credTypes),
+            '",\n',
+            '  "deployedAt": "',
+            vm.toString(block.timestamp),
+            '"\n',
             "}\n"
         );
         vm.writeFile("deployments/sepolia-eligibility.json", json);

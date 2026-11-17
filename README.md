@@ -1,5 +1,7 @@
 # vLEI → EAS bridge: on-chain contracts
 
+[![test](https://github.com/OnChainTrust/vlei-eas-contracts/actions/workflows/test.yml/badge.svg)](https://github.com/OnChainTrust/vlei-eas-contracts/actions/workflows/test.yml)
+
 The Solidity side of the [OnChainTrust vLEI bridge](https://converter.onchaintrust.org/): the EAS schema that carries a GLEIF vLEI identity to an Ethereum wallet, the resolver that pins it to one attester, and an eligibility slot that regulated-token contracts can ask "may this wallet hold this?".
 
 Status: prototype on the Sepolia testnet. Not audited, not for production use.
@@ -21,9 +23,9 @@ The bridge service (a separate, private repository) verifies the holder's vLEI c
 
 - `src/AttesterResolver.sol`: EAS schema resolver that admits exactly one immutable attester for attest and revoke.
 - `src/IEligibility.sol`: the slot interface, `isEligible(wallet)` and `explain(wallet)`. It mirrors the slot in the EEA Tokenization Starter Kit build plan ([finos-hack/fall-hackathon-2026-beta#1](https://github.com/finos-hack/fall-hackathon-2026-beta/issues/1), section 3.2) so a kit token can use it as a second slot implementation without an adapter.
-- `src/VleiEligibility.sol`: the slot answered by vLEI identity. A wallet is eligible when a registered attestation is under the bridge schema, from the bridge attester, issued to that wallet, not revoked, not expired, and of an accepted credential type (`LE`, `ECR`, `OOR`; constructor-configured). `identityOf(wallet)` returns the LEI, legal name, credential type and expiry for consoles. Views never revert.
+- `src/VleiEligibility.sol`: the slot answered by vLEI identity. A wallet is eligible when a registered attestation is under the bridge schema, from the bridge attester, issued to that wallet, not revoked, not expired, and of a credential type this instance accepts (set in the constructor; the deploy script defaults to `LE` and `ECR`, `OOR` is opt-in). `identityOf(wallet)` returns the LEI, legal name, credential type and expiry for consoles. Views never revert.
 
-Because EAS has no on-chain index by recipient, a wallet's attestation UID is registered once with `register(uid)`. Anyone may call it: the contract only accepts a live bridge attestation and takes the wallet from the attestation's own recipient, so a stranger cannot downgrade a wallet. Renewal is a second `register` with the new UID.
+Because EAS has no on-chain index by recipient, a wallet's attestation UID is registered once with `register(uid)`. Anyone may call it: the contract only accepts a live bridge attestation and takes the wallet from the attestation's own recipient, and while a wallet's registered attestation is still live it can only be replaced by one issued at the same time or later, so a stranger cannot downgrade a wallet. Renewal is a second `register` with the new UID.
 
 ### Using it with Shibui instead
 
@@ -38,7 +40,7 @@ forge build
 forge test
 ```
 
-Solidity 0.8.24; `eas-contracts` v1.4.0 (the interfaces compile under 0.8.24; the `EAS.sol` implementation itself pins 0.8.28, so tests use a minimal mock for `getAttestation`).
+Solidity 0.8.24; `eas-contracts` v1.4.0 and OpenZeppelin Contracts v5.2.0 as git submodules, revisions recorded in `foundry.lock` (the interfaces compile under 0.8.24; the `EAS.sol` implementation itself pins 0.8.28, so tests use a minimal mock for `getAttestation`).
 
 ## Deploy the eligibility slot on Sepolia
 
@@ -47,7 +49,7 @@ forge script script/DeployEligibility.s.sol --rpc-url $RPC_URL --broadcast \
   --private-key $DEPLOYER_PRIVATE_KEY --gas-estimate-multiplier 1000
 ```
 
-Any funded key may deploy it; the slot has no owner. `ELIGIBILITY_CRED_TYPES` (comma-separated, default `LE,ECR`) sets the accepted credential types. The gas multiplier is needed on Sepolia since the 2026-10-06 fork, which charges several times forge's local estimate.
+Any funded key may deploy it; the slot has no owner. `ELIGIBILITY_CRED_TYPES` (comma-separated, default `LE,ECR`) sets the accepted credential types; add `OOR` to admit official-role credentials. The gas multiplier is needed on Sepolia since the 2026-10-06 fork, which charges several times forge's local estimate.
 
 ## License
 

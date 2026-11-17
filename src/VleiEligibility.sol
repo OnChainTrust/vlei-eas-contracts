@@ -20,8 +20,10 @@ import {IEligibility} from "./IEligibility.sol";
 ///
 ///      EAS keeps no on-chain index by recipient, so a wallet's attestation UID has
 ///      to be registered once. Anyone may register a UID: the contract checks that it
-///      is a live bridge attestation issued to that recipient, so the only thing a
-///      stranger can do is point a wallet at a newer valid attestation of its own.
+///      is a live bridge attestation issued to that recipient, and while the wallet's
+///      registered attestation is still live it can only be replaced by one issued at
+///      the same time or later. So the only thing a stranger can do is point a wallet
+///      at a newer valid attestation of its own.
 contract VleiEligibility is IEligibility {
     IEAS public immutable eas;
     bytes32 public immutable schemaUid;
@@ -39,6 +41,7 @@ contract VleiEligibility is IEligibility {
     error ZeroAddress();
     error ZeroSchema();
     error NotLiveBridgeAttestation(bytes32 uid, string reason);
+    error OlderThanRegistered(bytes32 uid, bytes32 registeredUid);
 
     constructor(IEAS eas_, bytes32 schemaUid_, address attester_, string[] memory acceptedCredTypes) {
         if (address(eas_) == address(0) || attester_ == address(0)) revert ZeroAddress();
@@ -55,13 +58,20 @@ contract VleiEligibility is IEligibility {
     // ============ Registration ============
 
     /// @notice Point the attestation's recipient at `uid`. Reverts unless `uid` is a
-    ///         live bridge attestation under this slot's schema and attester. Called by
-    ///         the bridge after issuance, by the holder, or by anyone else.
+    ///         live bridge attestation under this slot's schema and attester, or if the
+    ///         recipient's registered attestation is still live and was issued later
+    ///         than `uid`. Called by the bridge after issuance, by the holder, or by
+    ///         anyone else.
     function register(bytes32 uid) external {
         Attestation memory att = eas.getAttestation(uid);
         (bool live, string memory reason) = _check(att, att.recipient);
         if (!live) revert NotLiveBridgeAttestation(uid, reason);
         bytes32 previous = attestationOf[att.recipient];
+        if (previous != bytes32(0) && previous != uid) {
+            Attestation memory prev = eas.getAttestation(previous);
+            (bool prevLive,) = _check(prev, att.recipient);
+            if (prevLive && att.time < prev.time) revert OlderThanRegistered(uid, previous);
+        }
         attestationOf[att.recipient] = uid;
         emit AttestationRegistered(att.recipient, uid, previous);
     }

@@ -53,7 +53,11 @@ contract VleiEligibilityTest is Test {
         );
     }
 
-    function _attestation(bytes32 uid, address recipient, string memory credType) internal view returns (Attestation memory a) {
+    function _attestation(bytes32 uid, address recipient, string memory credType)
+        internal
+        view
+        returns (Attestation memory a)
+    {
         a.uid = uid;
         a.schema = SCHEMA;
         a.time = uint64(block.timestamp);
@@ -63,6 +67,10 @@ contract VleiEligibilityTest is Test {
         a.attester = bridge;
         a.revocable = true;
         a.data = _data(credType);
+    }
+
+    function _expectNotLive(bytes32 uid, string memory reason) internal {
+        vm.expectRevert(abi.encodeWithSelector(VleiEligibility.NotLiveBridgeAttestation.selector, uid, reason));
     }
 
     function _issue(bytes32 uid, address recipient, string memory credType) internal {
@@ -91,7 +99,7 @@ contract VleiEligibilityTest is Test {
     }
 
     function test_RegisterRejects_UnknownUid() public {
-        vm.expectRevert();
+        _expectNotLive(bytes32(uint256(99)), "attestation not found on EAS");
         slot.register(bytes32(uint256(99)));
     }
 
@@ -99,7 +107,7 @@ contract VleiEligibilityTest is Test {
         Attestation memory a = _attestation(bytes32(uint256(1)), holder, "LE");
         a.attester = other;
         eas.set(a);
-        vm.expectRevert();
+        _expectNotLive(bytes32(uint256(1)), "attestation was not issued by the vLEI bridge");
         slot.register(bytes32(uint256(1)));
     }
 
@@ -107,7 +115,7 @@ contract VleiEligibilityTest is Test {
         Attestation memory a = _attestation(bytes32(uint256(1)), holder, "LE");
         a.schema = bytes32(uint256(0xdead));
         eas.set(a);
-        vm.expectRevert();
+        _expectNotLive(bytes32(uint256(1)), "attestation is not under the vLEI bridge schema");
         slot.register(bytes32(uint256(1)));
     }
 
@@ -117,7 +125,7 @@ contract VleiEligibilityTest is Test {
         _issue(bytes32(uint256(2)), holder, "LE");
         eas.revoke(bytes32(uint256(2)), uint64(block.timestamp));
         vm.prank(other);
-        vm.expectRevert();
+        _expectNotLive(bytes32(uint256(2)), "vLEI attestation revoked");
         slot.register(bytes32(uint256(2)));
         assertEq(slot.attestationOf(holder), bytes32(uint256(1)));
         assertTrue(slot.isEligible(holder));
@@ -132,6 +140,38 @@ contract VleiEligibilityTest is Test {
         slot.register(bytes32(uint256(2)));
         assertEq(slot.attestationOf(holder), bytes32(uint256(2)));
         vm.warp(RENEWAL + 1);
+        assertTrue(slot.isEligible(holder));
+    }
+
+    function test_RegisterRejects_OlderLiveAttestation_WhileNewerOneIsLive() public {
+        _issue(bytes32(uint256(1)), holder, "LE");
+        vm.warp(block.timestamp + 30 days);
+        _issue(bytes32(uint256(2)), holder, "LE");
+        slot.register(bytes32(uint256(2)));
+        vm.prank(other);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                VleiEligibility.OlderThanRegistered.selector, bytes32(uint256(1)), bytes32(uint256(2))
+            )
+        );
+        slot.register(bytes32(uint256(1)));
+        assertEq(slot.attestationOf(holder), bytes32(uint256(2)));
+    }
+
+    function test_RegisterAccepts_OlderLiveAttestation_OnceRegisteredOneIsRevoked() public {
+        _issue(bytes32(uint256(1)), holder, "LE");
+        vm.warp(block.timestamp + 30 days);
+        _issue(bytes32(uint256(2)), holder, "LE");
+        slot.register(bytes32(uint256(2)));
+        eas.revoke(bytes32(uint256(2)), uint64(block.timestamp));
+        slot.register(bytes32(uint256(1)));
+        assertTrue(slot.isEligible(holder));
+    }
+
+    function test_RegisterSameUidTwice_IsHarmless() public {
+        _issue(bytes32(uint256(1)), holder, "LE");
+        slot.register(bytes32(uint256(1)));
+        slot.register(bytes32(uint256(1)));
         assertTrue(slot.isEligible(holder));
     }
 
@@ -164,7 +204,7 @@ contract VleiEligibilityTest is Test {
         Attestation memory a = _attestation(bytes32(uint256(1)), holder, "LE");
         a.expirationTime = 0;
         eas.set(a);
-        vm.expectRevert();
+        _expectNotLive(bytes32(uint256(1)), "vLEI attestation has no expiry; the bridge always sets one");
         slot.register(bytes32(uint256(1)));
     }
 
@@ -172,7 +212,7 @@ contract VleiEligibilityTest is Test {
 
     function test_UnacceptedCredType_IsNotEligible() public {
         _issue(bytes32(uint256(1)), holder, "OOR");
-        vm.expectRevert();
+        _expectNotLive(bytes32(uint256(1)), "vLEI credential type OOR is not accepted by this slot");
         slot.register(bytes32(uint256(1)));
     }
 

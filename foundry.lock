@@ -1,0 +1,11 @@
+{
+  "lib/eas-contracts": {
+    "rev": "d223e17208aa110dd5ec694d77324a2321d93201"
+  },
+  "lib/forge-std": {
+    "rev": "2999b6563e1f07971a09d48b82f3fac910d72a05"
+  },
+  "lib/openzeppelin-contracts": {
+    "rev": "acd4ff74de833399287ed6b31b4debf6b2b35527"
+  }
+}
