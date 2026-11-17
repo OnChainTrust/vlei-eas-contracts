@@ -108,7 +108,8 @@ contract VleiEligibility is IEligibility {
         Attestation memory att = eas.getAttestation(uid);
         (bool ok,) = _check(att, wallet);
         if (!ok) return ("", "", "", 0);
-        (lei, legalName, credType,,,) = this.decode(att.data);
+        // `_check` has already decoded `att.data` successfully, so this cannot revert.
+        (lei, legalName, credType,,,) = abi.decode(att.data, (string, string, string, string, bytes32, uint64));
         expiresAt = att.expirationTime;
     }
 
@@ -138,6 +139,9 @@ contract VleiEligibility is IEligibility {
         if (att.recipient != wallet) return (false, "attestation was issued to a different wallet");
         if (att.revocationTime != 0) return (false, "vLEI attestation revoked");
         if (att.expirationTime == 0) return (false, "vLEI attestation has no expiry; the bridge always sets one");
+        // Expiry is a calendar date (the LEI renewal date); validator drift of a few
+        // seconds is irrelevant here.
+        // forge-lint: disable-next-line(block-timestamp)
         if (att.expirationTime <= block.timestamp) return (false, "vLEI attestation expired (LEI not renewed)");
 
         string memory lei;

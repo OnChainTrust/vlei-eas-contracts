@@ -60,7 +60,7 @@ contract VleiEligibilityTest is Test {
     {
         a.uid = uid;
         a.schema = SCHEMA;
-        a.time = uint64(block.timestamp);
+        a.time = uint64(vm.getBlockTimestamp());
         a.expirationTime = RENEWAL;
         a.revocationTime = 0;
         a.recipient = recipient;
@@ -123,7 +123,7 @@ contract VleiEligibilityTest is Test {
         _issue(bytes32(uint256(1)), holder, "LE");
         slot.register(bytes32(uint256(1)));
         _issue(bytes32(uint256(2)), holder, "LE");
-        eas.revoke(bytes32(uint256(2)), uint64(block.timestamp));
+        eas.revoke(bytes32(uint256(2)), uint64(vm.getBlockTimestamp()));
         vm.prank(other);
         _expectNotLive(bytes32(uint256(2)), "vLEI attestation revoked");
         slot.register(bytes32(uint256(2)));
@@ -145,7 +145,7 @@ contract VleiEligibilityTest is Test {
 
     function test_RegisterRejects_OlderLiveAttestation_WhileNewerOneIsLive() public {
         _issue(bytes32(uint256(1)), holder, "LE");
-        vm.warp(block.timestamp + 30 days);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
         _issue(bytes32(uint256(2)), holder, "LE");
         slot.register(bytes32(uint256(2)));
         vm.prank(other);
@@ -160,10 +160,10 @@ contract VleiEligibilityTest is Test {
 
     function test_RegisterAccepts_OlderLiveAttestation_OnceRegisteredOneIsRevoked() public {
         _issue(bytes32(uint256(1)), holder, "LE");
-        vm.warp(block.timestamp + 30 days);
+        vm.warp(vm.getBlockTimestamp() + 30 days);
         _issue(bytes32(uint256(2)), holder, "LE");
         slot.register(bytes32(uint256(2)));
-        eas.revoke(bytes32(uint256(2)), uint64(block.timestamp));
+        eas.revoke(bytes32(uint256(2)), uint64(vm.getBlockTimestamp()));
         slot.register(bytes32(uint256(1)));
         assertTrue(slot.isEligible(holder));
     }
@@ -187,7 +187,7 @@ contract VleiEligibilityTest is Test {
     function test_Revocation_BlocksImmediately() public {
         _issue(bytes32(uint256(1)), holder, "ECR");
         slot.register(bytes32(uint256(1)));
-        eas.revoke(bytes32(uint256(1)), uint64(block.timestamp));
+        eas.revoke(bytes32(uint256(1)), uint64(vm.getBlockTimestamp()));
         assertFalse(slot.isEligible(holder));
         assertEq(slot.explain(holder), "vLEI attestation revoked");
     }
@@ -257,7 +257,7 @@ contract VleiEligibilityTest is Test {
     function test_IdentityOf_EmptyWhenNotEligible() public {
         _issue(bytes32(uint256(1)), holder, "LE");
         slot.register(bytes32(uint256(1)));
-        eas.revoke(bytes32(uint256(1)), uint64(block.timestamp));
+        eas.revoke(bytes32(uint256(1)), uint64(vm.getBlockTimestamp()));
         (string memory lei,,, uint64 exp) = slot.identityOf(holder);
         assertEq(lei, "");
         assertEq(exp, 0);
