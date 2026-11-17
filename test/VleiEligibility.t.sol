@@ -1,0 +1,237 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.24;
+
+import {Test} from "forge-std/Test.sol";
+import {IEAS, Attestation} from "@eas/IEAS.sol";
+import {VleiEligibility} from "../src/VleiEligibility.sol";
+
+/// @dev Minimal stand-in for EAS: the real contract pins solc 0.8.28 and cannot be
+///      compiled into this 0.8.24 project. Only `getAttestation` is exercised.
+contract MockEAS {
+    mapping(bytes32 => Attestation) private _att;
+
+    function set(Attestation memory a) external {
+        _att[a.uid] = a;
+    }
+
+    function revoke(bytes32 uid, uint64 at) external {
+        _att[uid].revocationTime = at;
+    }
+
+    function getAttestation(bytes32 uid) external view returns (Attestation memory) {
+        return _att[uid];
+    }
+}
+
+contract VleiEligibilityTest is Test {
+    MockEAS eas;
+    VleiEligibility slot;
+
+    bytes32 constant SCHEMA = 0x0b5f333cdb7e06e0d9f7c5fbd7a151bb0d8afbcde17017390ef73b673f841aa7;
+    address bridge = makeAddr("bridge");
+    address holder = makeAddr("holder");
+    address other = makeAddr("other");
+    uint64 constant RENEWAL = 1_800_000_000 + 300 days;
+
+    function setUp() public {
+        vm.warp(1_800_000_000);
+        eas = new MockEAS();
+        string[] memory types = new string[](2);
+        types[0] = "LE";
+        types[1] = "ECR";
+        slot = new VleiEligibility(IEAS(address(eas)), SCHEMA, bridge, types);
+    }
+
+    function _data(string memory credType) internal pure returns (bytes memory) {
+        return abi.encode(
+            "875500ELOZEL05BVXV37",
+            "Global Legal Entity Identifier Foundation Singapore Branch",
+            credType,
+            "EKYGGh-FtAphGmSZbsuBs_t4qpsjYJ2ZqvMKluq9OxmY",
+            keccak256("said"),
+            uint64(1_700_000_000) // verifiedAt: years ago, must not matter
+        );
+    }
+
+    function _attestation(bytes32 uid, address recipient, string memory credType) internal view returns (Attestation memory a) {
+        a.uid = uid;
+        a.schema = SCHEMA;
+        a.time = uint64(block.timestamp);
+        a.expirationTime = RENEWAL;
+        a.revocationTime = 0;
+        a.recipient = recipient;
+        a.attester = bridge;
+        a.revocable = true;
+        a.data = _data(credType);
+    }
+
+    function _issue(bytes32 uid, address recipient, string memory credType) internal {
+        eas.set(_attestation(uid, recipient, credType));
+    }
+
+    // ---- registration ----
+
+    function test_RegisterLiveAttestation_MakesHolderEligible() public {
+        _issue(bytes32(uint256(1)), holder, "ECR");
+        slot.register(bytes32(uint256(1)));
+        assertTrue(slot.isEligible(holder));
+        assertEq(slot.attestationOf(holder), bytes32(uint256(1)));
+        assertEq(
+            slot.explain(holder),
+            "ok: ECR credential of Global Legal Entity Identifier Foundation Singapore Branch (LEI 875500ELOZEL05BVXV37)"
+        );
+    }
+
+    function test_AnyoneMayRegister_RecipientComesFromTheAttestation() public {
+        _issue(bytes32(uint256(1)), holder, "LE");
+        vm.prank(other);
+        slot.register(bytes32(uint256(1)));
+        assertTrue(slot.isEligible(holder));
+        assertFalse(slot.isEligible(other));
+    }
+
+    function test_RegisterRejects_UnknownUid() public {
+        vm.expectRevert();
+        slot.register(bytes32(uint256(99)));
+    }
+
+    function test_RegisterRejects_WrongAttester() public {
+        Attestation memory a = _attestation(bytes32(uint256(1)), holder, "LE");
+        a.attester = other;
+        eas.set(a);
+        vm.expectRevert();
+        slot.register(bytes32(uint256(1)));
+    }
+
+    function test_RegisterRejects_WrongSchema() public {
+        Attestation memory a = _attestation(bytes32(uint256(1)), holder, "LE");
+        a.schema = bytes32(uint256(0xdead));
+        eas.set(a);
+        vm.expectRevert();
+        slot.register(bytes32(uint256(1)));
+    }
+
+    function test_RegisterRejects_RevokedAttestation_SoStrangersCannotDowngradeAWallet() public {
+        _issue(bytes32(uint256(1)), holder, "LE");
+        slot.register(bytes32(uint256(1)));
+        _issue(bytes32(uint256(2)), holder, "LE");
+        eas.revoke(bytes32(uint256(2)), uint64(block.timestamp));
+        vm.prank(other);
+        vm.expectRevert();
+        slot.register(bytes32(uint256(2)));
+        assertEq(slot.attestationOf(holder), bytes32(uint256(1)));
+        assertTrue(slot.isEligible(holder));
+    }
+
+    function test_Renewal_NewUidReplacesOld() public {
+        _issue(bytes32(uint256(1)), holder, "LE");
+        slot.register(bytes32(uint256(1)));
+        Attestation memory renewed = _attestation(bytes32(uint256(2)), holder, "LE");
+        renewed.expirationTime = RENEWAL + 365 days;
+        eas.set(renewed);
+        slot.register(bytes32(uint256(2)));
+        assertEq(slot.attestationOf(holder), bytes32(uint256(2)));
+        vm.warp(RENEWAL + 1);
+        assertTrue(slot.isEligible(holder));
+    }
+
+    // ---- liveness: EAS semantics, not verifiedAt ----
+
+    function test_OldVerifiedAt_DoesNotMatter() public {
+        _issue(bytes32(uint256(1)), holder, "ECR");
+        slot.register(bytes32(uint256(1)));
+        vm.warp(RENEWAL - 1);
+        assertTrue(slot.isEligible(holder));
+    }
+
+    function test_Revocation_BlocksImmediately() public {
+        _issue(bytes32(uint256(1)), holder, "ECR");
+        slot.register(bytes32(uint256(1)));
+        eas.revoke(bytes32(uint256(1)), uint64(block.timestamp));
+        assertFalse(slot.isEligible(holder));
+        assertEq(slot.explain(holder), "vLEI attestation revoked");
+    }
+
+    function test_Expiry_BlocksAtRenewalDate() public {
+        _issue(bytes32(uint256(1)), holder, "ECR");
+        slot.register(bytes32(uint256(1)));
+        vm.warp(RENEWAL);
+        assertFalse(slot.isEligible(holder));
+        assertEq(slot.explain(holder), "vLEI attestation expired (LEI not renewed)");
+    }
+
+    function test_NoExpiry_FailsClosed() public {
+        Attestation memory a = _attestation(bytes32(uint256(1)), holder, "LE");
+        a.expirationTime = 0;
+        eas.set(a);
+        vm.expectRevert();
+        slot.register(bytes32(uint256(1)));
+    }
+
+    // ---- credential type ----
+
+    function test_UnacceptedCredType_IsNotEligible() public {
+        _issue(bytes32(uint256(1)), holder, "OOR");
+        vm.expectRevert();
+        slot.register(bytes32(uint256(1)));
+    }
+
+    function test_EmptyAcceptedSet_AcceptsAnyCredType() public {
+        VleiEligibility any = new VleiEligibility(IEAS(address(eas)), SCHEMA, bridge, new string[](0));
+        _issue(bytes32(uint256(1)), holder, "OOR");
+        any.register(bytes32(uint256(1)));
+        assertTrue(any.isEligible(holder));
+    }
+
+    // ---- never revert from views ----
+
+    function test_Views_DoNotRevert_ForUnknownWallet() public view {
+        assertFalse(slot.isEligible(other));
+        assertEq(slot.explain(other), "no vLEI attestation registered for this wallet");
+        (string memory lei,,,) = slot.identityOf(other);
+        assertEq(lei, "");
+    }
+
+    function test_Views_DoNotRevert_WhenRegisteredDataTurnsMalformed() public {
+        _issue(bytes32(uint256(1)), holder, "LE");
+        slot.register(bytes32(uint256(1)));
+        Attestation memory a = _attestation(bytes32(uint256(1)), holder, "LE");
+        a.data = hex"deadbeef";
+        eas.set(a);
+        assertFalse(slot.isEligible(holder));
+        assertEq(slot.explain(holder), "attestation data does not decode as the vLEI bridge schema");
+    }
+
+    // ---- identity view ----
+
+    function test_IdentityOf_ReturnsLeiAndLegalName() public {
+        _issue(bytes32(uint256(1)), holder, "LE");
+        slot.register(bytes32(uint256(1)));
+        (string memory lei, string memory name, string memory credType, uint64 exp) = slot.identityOf(holder);
+        assertEq(lei, "875500ELOZEL05BVXV37");
+        assertEq(name, "Global Legal Entity Identifier Foundation Singapore Branch");
+        assertEq(credType, "LE");
+        assertEq(exp, RENEWAL);
+    }
+
+    function test_IdentityOf_EmptyWhenNotEligible() public {
+        _issue(bytes32(uint256(1)), holder, "LE");
+        slot.register(bytes32(uint256(1)));
+        eas.revoke(bytes32(uint256(1)), uint64(block.timestamp));
+        (string memory lei,,, uint64 exp) = slot.identityOf(holder);
+        assertEq(lei, "");
+        assertEq(exp, 0);
+    }
+
+    // ---- constructor ----
+
+    function test_ConstructorRejects_ZeroValues() public {
+        string[] memory none = new string[](0);
+        vm.expectRevert(VleiEligibility.ZeroAddress.selector);
+        new VleiEligibility(IEAS(address(0)), SCHEMA, bridge, none);
+        vm.expectRevert(VleiEligibility.ZeroAddress.selector);
+        new VleiEligibility(IEAS(address(eas)), SCHEMA, address(0), none);
+        vm.expectRevert(VleiEligibility.ZeroSchema.selector);
+        new VleiEligibility(IEAS(address(eas)), bytes32(0), bridge, none);
+    }
+}
