@@ -1,18 +1,35 @@
-// SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+// SPDX-License-Identifier: Apache-2.0
+// Copied verbatim from the EEA Tokenization Starter Kit
+// (finos-hack/fall-hackathon-2026-beta, contracts/interfaces/IEligibility.sol, 2026-11-17)
+// so that VleiEligibility is a drop-in slot for RegulatedToken. Keep in sync with upstream.
+pragma solidity =0.8.24;
 
 /// @title IEligibility
-/// @notice The "eligibility slot" a regulated token asks before moving funds:
-///         may this wallet hold the token? Mirrors the slot interface in the EEA
-///         Tokenization Starter Kit build plan (finos-hack/fall-hackathon-2026-beta#1,
-///         section 3.2). Implementations must never revert from these views
-///         (ERC-7943 `canSend` / `canReceive` / `canTransfer` forbid it); a failure
-///         is answered with `false` and a reason.
+/// @notice The eligibility slot: the single question a RegulatedToken asks before any balance moves.
+/// @dev Think of the token as a club and the slot as its door. The club never checks IDs itself.
+///      Shibui answers today (ShibuiEligibility); OnChainTrust or vLEI can answer later without
+///      touching the token.
 interface IEligibility {
-    /// @notice True when `wallet` currently satisfies this slot's rule.
+    /// @notice Per-topic outcome reported by `explain`.
+    enum Status {
+        OK, // a trusted attester's live credential satisfies the topic policy
+        NOT_REGISTERED, // no credential registered for this topic
+        REVOKED, // the registered credential was revoked on EAS
+        EXPIRED, // the credential expired (EAS-level or in its own payload)
+        ATTESTER_NOT_TRUSTED, // a credential exists, but its attester is no longer trusted for the topic
+        POLICY_REJECTED, // the credential is live, but its content fails the topic policy
+        POLICY_MISSING, // the topic has no policy or schema configured: fails closed
+        MISCONFIGURED // the eligibility source itself is not wired up: fails closed
+    }
+
+    struct TopicStatus {
+        uint256 topic;
+        Status status;
+    }
+
+    /// @notice True if `wallet` may hold the token right now. Implementations must not grant on error.
     function isEligible(address wallet) external view returns (bool);
 
-    /// @notice Human-readable reason for the current answer, for consoles and audit
-    ///         trails. "ok" prefixes a positive answer.
-    function explain(address wallet) external view returns (string memory);
+    /// @notice Each required topic with its status. Read-only, never used for enforcement.
+    function explain(address wallet) external view returns (TopicStatus[] memory);
 }

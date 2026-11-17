@@ -22,8 +22,8 @@ The bridge service (a separate, private repository) verifies the holder's vLEI c
 ## Contracts
 
 - `src/AttesterResolver.sol`: EAS schema resolver that admits exactly one immutable attester for attest and revoke.
-- `src/IEligibility.sol`: the slot interface, `isEligible(wallet)` and `explain(wallet)`. It mirrors the slot in the EEA Tokenization Starter Kit build plan ([finos-hack/fall-hackathon-2026-beta#1](https://github.com/finos-hack/fall-hackathon-2026-beta/issues/1), section 3.2) so a kit token can use it as a second slot implementation without an adapter.
-- `src/VleiEligibility.sol`: the slot answered by vLEI identity. A wallet is eligible when a registered attestation is under the bridge schema, from the bridge attester, issued to that wallet, not revoked, not expired, and of a credential type this instance accepts (set in the constructor; the deploy script defaults to `LE` and `ECR`, `OOR` is opt-in). `identityOf(wallet)` returns the LEI, legal name, credential type and expiry for consoles. Views never revert.
+- `src/IEligibility.sol`: the slot interface, `isEligible(wallet)` and `explain(wallet)` (one `TopicStatus{topic, status}` per required topic, with the kit's eight-value `Status` enum). It is a verbatim copy of `contracts/interfaces/IEligibility.sol` in the [EEA Tokenization Starter Kit](https://github.com/finos-hack/fall-hackathon-2026-beta), so a kit `RegulatedToken` can be pointed at `VleiEligibility` with `setEligibility` and no adapter.
+- `src/VleiEligibility.sol`: the slot answered by vLEI identity. A wallet is eligible when a registered attestation is under the bridge schema, from the bridge attester, issued to that wallet, not revoked, not expired, and of a credential type this instance accepts (set in the constructor; the deploy script defaults to `LE` and `ECR`, `OOR` is opt-in). `explain` reports one status on the configured claim topic (default 15, Shibui's `VLEI_LEGAL_ENTITY`): `NOT_REGISTERED`, `REVOKED`, `EXPIRED`, `ATTESTER_NOT_TRUSTED`, `POLICY_REJECTED` or `OK`. `reason(wallet)` gives the same answer in words and `identityOf(wallet)` the LEI, legal name, credential type and expiry, for consoles. Views never revert.
 
 Because EAS has no on-chain index by recipient, a wallet's attestation UID is registered once with `register(uid)`. Anyone may call it: the contract only accepts a live bridge attestation and takes the wallet from the attestation's own recipient, and while a wallet's registered attestation is still live it can only be replaced by one issued at the same time or later, so a stranger cannot downgrade a wallet. Renewal is a second `register` with the new UID.
 
@@ -49,7 +49,7 @@ forge script script/DeployEligibility.s.sol --rpc-url $RPC_URL --broadcast \
   --private-key $DEPLOYER_PRIVATE_KEY --gas-estimate-multiplier 1000
 ```
 
-Any funded key may deploy it; the slot has no owner. `ELIGIBILITY_CRED_TYPES` (comma-separated, default `LE,ECR`) sets the accepted credential types; add `OOR` to admit official-role credentials. The gas multiplier is needed on Sepolia since the 2026-10-06 fork, which charges several times forge's local estimate.
+Any funded key may deploy it; the slot has no owner. `ELIGIBILITY_CRED_TYPES` (comma-separated, default `LE,ECR`) sets the accepted credential types; add `OOR` to admit official-role credentials. `ELIGIBILITY_TOPIC` (default 15) is the claim topic `explain` reports. The gas multiplier is needed on Sepolia since the 2026-10-06 fork, which charges several times forge's local estimate.
 
 ## License
 

@@ -3,6 +3,7 @@ pragma solidity 0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {IEAS, Attestation} from "@eas/IEAS.sol";
+import {IEligibility} from "../src/IEligibility.sol";
 import {VleiEligibility} from "../src/VleiEligibility.sol";
 
 /// @dev Minimal stand-in for EAS: the real contract pins solc 0.8.28 and cannot be
@@ -28,6 +29,7 @@ contract VleiEligibilityTest is Test {
     VleiEligibility slot;
 
     bytes32 constant SCHEMA = 0x0b5f333cdb7e06e0d9f7c5fbd7a151bb0d8afbcde17017390ef73b673f841aa7;
+    uint256 constant TOPIC = 15; // Shibui VLEI_LEGAL_ENTITY
     address bridge = makeAddr("bridge");
     address holder = makeAddr("holder");
     address other = makeAddr("other");
@@ -39,7 +41,7 @@ contract VleiEligibilityTest is Test {
         string[] memory types = new string[](2);
         types[0] = "LE";
         types[1] = "ECR";
-        slot = new VleiEligibility(IEAS(address(eas)), SCHEMA, bridge, types);
+        slot = new VleiEligibility(IEAS(address(eas)), SCHEMA, bridge, TOPIC, types);
     }
 
     function _data(string memory credType) internal pure returns (bytes memory) {
@@ -77,6 +79,18 @@ contract VleiEligibilityTest is Test {
         eas.set(_attestation(uid, recipient, credType));
     }
 
+    /// @dev The single TopicStatus `explain` reports for `wallet`, checked to be on the slot's topic.
+    function _status(address wallet) internal view returns (IEligibility.Status) {
+        IEligibility.TopicStatus[] memory out = slot.explain(wallet);
+        assertEq(out.length, 1);
+        assertEq(out[0].topic, TOPIC);
+        return out[0].status;
+    }
+
+    function _assertStatus(address wallet, IEligibility.Status expected) internal view {
+        assertEq(uint256(_status(wallet)), uint256(expected));
+    }
+
     // ---- registration ----
 
     function test_RegisterLiveAttestation_MakesHolderEligible() public {
@@ -84,8 +98,9 @@ contract VleiEligibilityTest is Test {
         slot.register(bytes32(uint256(1)));
         assertTrue(slot.isEligible(holder));
         assertEq(slot.attestationOf(holder), bytes32(uint256(1)));
+        _assertStatus(holder, IEligibility.Status.OK);
         assertEq(
-            slot.explain(holder),
+            slot.reason(holder),
             "ok: ECR credential of Global Legal Entity Identifier Foundation Singapore Branch (LEI 875500ELOZEL05BVXV37)"
         );
     }
@@ -189,7 +204,8 @@ contract VleiEligibilityTest is Test {
         slot.register(bytes32(uint256(1)));
         eas.revoke(bytes32(uint256(1)), uint64(vm.getBlockTimestamp()));
         assertFalse(slot.isEligible(holder));
-        assertEq(slot.explain(holder), "vLEI attestation revoked");
+        _assertStatus(holder, IEligibility.Status.REVOKED);
+        assertEq(slot.reason(holder), "vLEI attestation revoked");
     }
 
     function test_Expiry_BlocksAtRenewalDate() public {
@@ -197,7 +213,8 @@ contract VleiEligibilityTest is Test {
         slot.register(bytes32(uint256(1)));
         vm.warp(RENEWAL);
         assertFalse(slot.isEligible(holder));
-        assertEq(slot.explain(holder), "vLEI attestation expired (LEI not renewed)");
+        _assertStatus(holder, IEligibility.Status.EXPIRED);
+        assertEq(slot.reason(holder), "vLEI attestation expired (LEI not renewed)");
     }
 
     function test_NoExpiry_FailsClosed() public {
@@ -217,29 +234,58 @@ contract VleiEligibilityTest is Test {
     }
 
     function test_EmptyAcceptedSet_AcceptsAnyCredType() public {
-        VleiEligibility any = new VleiEligibility(IEAS(address(eas)), SCHEMA, bridge, new string[](0));
+        VleiEligibility any = new VleiEligibility(IEAS(address(eas)), SCHEMA, bridge, TOPIC, new string[](0));
         _issue(bytes32(uint256(1)), holder, "OOR");
         any.register(bytes32(uint256(1)));
         assertTrue(any.isEligible(holder));
     }
 
-    // ---- never revert from views ----
+    // ---- IEligibility.explain: one TopicStatus on the slot's topic, never reverts ----
 
-    function test_Views_DoNotRevert_ForUnknownWallet() public view {
+    function test_Explain_NotRegistered_ForUnknownWallet() public view {
         assertFalse(slot.isEligible(other));
-        assertEq(slot.explain(other), "no vLEI attestation registered for this wallet");
+        _assertStatus(other, IEligibility.Status.NOT_REGISTERED);
+        assertEq(slot.reason(other), "no vLEI attestation registered for this wallet");
         (string memory lei,,,) = slot.identityOf(other);
         assertEq(lei, "");
     }
 
-    function test_Views_DoNotRevert_WhenRegisteredDataTurnsMalformed() public {
+    function test_Explain_ReportsTheConfiguredTopic() public {
+        VleiEligibility role = new VleiEligibility(IEAS(address(eas)), SCHEMA, bridge, 16, new string[](0));
+        assertEq(role.topic(), 16);
+        IEligibility.TopicStatus[] memory out = role.explain(other);
+        assertEq(out.length, 1);
+        assertEq(out[0].topic, 16);
+        assertEq(uint256(out[0].status), uint256(IEligibility.Status.NOT_REGISTERED));
+    }
+
+    function test_Explain_AttesterNotTrusted_WhenRegisteredAttestationChangesAttester() public {
+        _issue(bytes32(uint256(1)), holder, "LE");
+        slot.register(bytes32(uint256(1)));
+        Attestation memory a = _attestation(bytes32(uint256(1)), holder, "LE");
+        a.attester = other;
+        eas.set(a);
+        assertFalse(slot.isEligible(holder));
+        _assertStatus(holder, IEligibility.Status.ATTESTER_NOT_TRUSTED);
+    }
+
+    function test_Explain_PolicyRejected_WhenRegisteredDataTurnsMalformed() public {
         _issue(bytes32(uint256(1)), holder, "LE");
         slot.register(bytes32(uint256(1)));
         Attestation memory a = _attestation(bytes32(uint256(1)), holder, "LE");
         a.data = hex"deadbeef";
         eas.set(a);
         assertFalse(slot.isEligible(holder));
-        assertEq(slot.explain(holder), "attestation data does not decode as the vLEI bridge schema");
+        _assertStatus(holder, IEligibility.Status.POLICY_REJECTED);
+        assertEq(slot.reason(holder), "attestation data does not decode as the vLEI bridge schema");
+    }
+
+    function test_Explain_PolicyRejected_WhenRegisteredCredTypeStopsBeingAccepted() public {
+        _issue(bytes32(uint256(1)), holder, "LE");
+        slot.register(bytes32(uint256(1)));
+        _issue(bytes32(uint256(1)), holder, "OOR"); // same UID, data rewritten in the mock
+        assertFalse(slot.isEligible(holder));
+        _assertStatus(holder, IEligibility.Status.POLICY_REJECTED);
     }
 
     // ---- identity view ----
@@ -268,10 +314,10 @@ contract VleiEligibilityTest is Test {
     function test_ConstructorRejects_ZeroValues() public {
         string[] memory none = new string[](0);
         vm.expectRevert(VleiEligibility.ZeroAddress.selector);
-        new VleiEligibility(IEAS(address(0)), SCHEMA, bridge, none);
+        new VleiEligibility(IEAS(address(0)), SCHEMA, bridge, TOPIC, none);
         vm.expectRevert(VleiEligibility.ZeroAddress.selector);
-        new VleiEligibility(IEAS(address(eas)), SCHEMA, address(0), none);
+        new VleiEligibility(IEAS(address(eas)), SCHEMA, address(0), TOPIC, none);
         vm.expectRevert(VleiEligibility.ZeroSchema.selector);
-        new VleiEligibility(IEAS(address(eas)), bytes32(0), bridge, none);
+        new VleiEligibility(IEAS(address(eas)), bytes32(0), bridge, TOPIC, none);
     }
 }

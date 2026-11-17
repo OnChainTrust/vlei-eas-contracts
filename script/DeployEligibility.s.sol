@@ -6,7 +6,8 @@ import {VleiEligibility} from "../src/VleiEligibility.sol";
 import {IEAS} from "@eas/IEAS.sol";
 
 /// @dev Deploys a VleiEligibility slot bound to the live bridge schema and attester on Sepolia.
-///      Accepted credential types come from ELIGIBILITY_CRED_TYPES (comma-separated, default "LE,ECR").
+///      Accepted credential types come from ELIGIBILITY_CRED_TYPES (comma-separated, default "LE,ECR");
+///      the claim topic reported by `explain` from ELIGIBILITY_TOPIC (default 15, Shibui's VLEI_LEGAL_ENTITY).
 ///
 ///      forge script script/DeployEligibility.s.sol --rpc-url $RPC_URL --broadcast \
 ///        --private-key $DEPLOYER_PRIVATE_KEY --gas-estimate-multiplier 1000
@@ -22,12 +23,15 @@ contract DeployEligibilityScript is Script {
         if (block.chainid != SEPOLIA_CHAIN_ID) revert WrongChain(block.chainid, SEPOLIA_CHAIN_ID);
 
         string[] memory credTypes = vm.envOr("ELIGIBILITY_CRED_TYPES", ",", _defaultCredTypes());
+        uint256 topic = vm.envOr("ELIGIBILITY_TOPIC", uint256(15));
 
         vm.startBroadcast();
-        VleiEligibility slot = new VleiEligibility(IEAS(SEPOLIA_EAS), BRIDGE_SCHEMA_UID, BRIDGE_ATTESTER, credTypes);
+        VleiEligibility slot =
+            new VleiEligibility(IEAS(SEPOLIA_EAS), BRIDGE_SCHEMA_UID, BRIDGE_ATTESTER, topic, credTypes);
         vm.stopBroadcast();
 
         console.log("VleiEligibility deployed:", address(slot));
+        console.log("  topic:", topic);
         for (uint256 i = 0; i < credTypes.length; i++) {
             console.log("  accepts credType:", credTypes[i]);
         }
@@ -43,6 +47,9 @@ contract DeployEligibilityScript is Script {
             '  "attester": "',
             vm.toString(BRIDGE_ATTESTER),
             '",\n',
+            '  "topic": ',
+            vm.toString(topic),
+            ",\n",
             '  "acceptedCredTypes": "',
             _join(credTypes),
             '",\n',
