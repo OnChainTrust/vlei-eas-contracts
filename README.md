@@ -2,7 +2,7 @@
 
 [![test](https://github.com/OnChainTrust/vlei-eas-contracts/actions/workflows/test.yml/badge.svg)](https://github.com/OnChainTrust/vlei-eas-contracts/actions/workflows/test.yml)
 
-The Solidity side of the [OnChainTrust vLEI bridge](https://converter.onchaintrust.org/): the EAS schema that carries a GLEIF vLEI identity to an Ethereum wallet, the resolver that pins it to one attester, and an eligibility slot that regulated-token contracts can ask "may this wallet hold this?".
+The Solidity side of the [OnChainTrust vLEI bridge](https://bridge.onchaintrust.org/): the EAS schema that carries a GLEIF vLEI identity to an Ethereum wallet, the resolver that pins it to one attester, and an eligibility slot that regulated-token contracts can ask "may this wallet hold this?".
 
 Status: prototype on the Sepolia testnet. Not audited, not for production use.
 
